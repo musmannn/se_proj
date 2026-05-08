@@ -11,12 +11,18 @@ export default class AdminService {
     this.reviewRepository = new ReviewRepository();
   }
 
-  getDashboardSummary() {
+  async getDashboardSummary() {
+    const [products, orders, lowStock, avgRating] = await Promise.all([
+      this.productRepository.getAll(),
+      this.orderRepository.getAll(),
+      this.inventoryRepository.getLowStockAlerts(),
+      this.reviewRepository.getOverallAverageRating()
+    ]);
     return {
-      totalProducts: this.productRepository.getAll().length,
-      totalOrders: this.orderRepository.getAll().length,
-      lowStockCount: this.inventoryRepository.getLowStockAlerts().length,
-      avgRating: this.reviewRepository.getOverallAverageRating()
+      totalProducts: products.length,
+      totalOrders: orders.length,
+      lowStockCount: lowStock.length,
+      avgRating
     };
   }
 }

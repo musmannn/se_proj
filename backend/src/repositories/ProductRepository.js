@@ -1,13 +1,11 @@
-import db from '../db/connection.js';
+import { query } from '../db/connection.js';
 import IDataPersist from './IDataPersist.js';
 
 export default class ProductRepository extends IDataPersist {
-  create(product) {
-    const result = db
-      .prepare(
-        'INSERT INTO Products (name, imageUrl, price, fabric, cut, season, gsm, status, categoryID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      )
-      .run(
+  async create(product) {
+    const result = await query(
+      'INSERT INTO Products (name, imageUrl, price, fabric, cut, season, gsm, status, categoryID) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING productID AS "productID", name, imageUrl AS "imageUrl", price, fabric, cut, season, gsm, status, categoryID AS "categoryID"',
+      [
         product.name,
         product.imageUrl || null,
         product.price,
@@ -17,107 +15,120 @@ export default class ProductRepository extends IDataPersist {
         product.gsm,
         product.status,
         product.categoryID
-      );
-    return this.getById(result.lastInsertRowid);
+      ]
+    );
+    return result.rows[0];
   }
 
-  getById(id) {
-    return db
-      .prepare(
-        `SELECT p.*, c.name as categoryName, c.description as categoryDescription
-         FROM Products p
-         JOIN Categories c ON p.categoryID = c.categoryID
-         WHERE p.productID = ?`
-      )
-      .get(id);
+  async getById(id) {
+    const result = await query(
+      `SELECT p.productID AS "productID", p.name, p.imageUrl AS "imageUrl", p.price, p.fabric,
+         p.cut, p.season, p.gsm, p.status, p.categoryID AS "categoryID",
+         c.name AS "categoryName", c.description AS "categoryDescription"
+       FROM Products p
+       JOIN Categories c ON p.categoryID = c.categoryID
+       WHERE p.productID = $1`,
+      [id]
+    );
+    return result.rows[0] || null;
   }
 
-  getAll(filters = {}) {
+  async getAll(filters = {}) {
     const conditions = [];
     const params = [];
 
     if (filters.category) {
-      conditions.push('c.name = ?');
       params.push(filters.category);
+      conditions.push(`c.name = $${params.length}`);
     }
     if (filters.fabric) {
-      conditions.push('p.fabric = ?');
       params.push(filters.fabric);
+      conditions.push(`p.fabric = $${params.length}`);
     }
     if (filters.cut) {
-      conditions.push('p.cut = ?');
       params.push(filters.cut);
+      conditions.push(`p.cut = $${params.length}`);
     }
     if (filters.season) {
-      conditions.push('p.season = ?');
       params.push(filters.season);
+      conditions.push(`p.season = $${params.length}`);
     }
     if (filters.gsm_min) {
-      conditions.push('p.gsm >= ?');
       params.push(Number(filters.gsm_min));
+      conditions.push(`p.gsm >= $${params.length}`);
     }
     if (filters.gsm_max) {
-      conditions.push('p.gsm <= ?');
       params.push(Number(filters.gsm_max));
+      conditions.push(`p.gsm <= $${params.length}`);
     }
     if (filters.status) {
-      conditions.push('p.status = ?');
       params.push(filters.status);
+      conditions.push(`p.status = $${params.length}`);
     } else if (filters.include_discontinued !== 'true') {
       conditions.push("p.status != 'discontinued'");
     }
     if (filters.search) {
-      conditions.push('(p.name LIKE ? OR p.fabric LIKE ? OR c.name LIKE ?)');
-      params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`);
+      const search = `%${filters.search}%`;
+      params.push(search, search, search);
+      const start = params.length - 2;
+      conditions.push(`(p.name ILIKE $${start} OR p.fabric ILIKE $${start + 1} OR c.name ILIKE $${start + 2})`);
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const query = `
-      SELECT p.*, c.name as categoryName,
-      COALESCE(ROUND(AVG(r.rating), 2), 0) as avgRating
+    const sql = `
+      SELECT p.productID AS "productID", p.name, p.imageUrl AS "imageUrl", p.price, p.fabric, p.cut,
+        p.season, p.gsm, p.status, p.categoryID AS "categoryID",
+        c.name AS "categoryName", COALESCE(r.avgRating, 0) AS "avgRating"
       FROM Products p
       JOIN Categories c ON p.categoryID = c.categoryID
-      LEFT JOIN Reviews r ON p.productID = r.productID
+      LEFT JOIN (
+        SELECT productID, ROUND(AVG(rating)::numeric, 2)::double precision AS avgRating
+        FROM Reviews
+        GROUP BY productID
+      ) r ON p.productID = r.productID
       ${where}
-      GROUP BY p.productID
       ORDER BY p.productID DESC
     `;
 
-    return db.prepare(query).all(...params);
+    const result = await query(sql, params);
+    return result.rows;
   }
 
-  getProductDetails(id) {
-    const product = db
-      .prepare(
-        `SELECT p.*, c.name as categoryName,
-         COALESCE(ROUND(AVG(r.rating), 2), 0) as avgRating
-         FROM Products p
-         JOIN Categories c ON p.categoryID = c.categoryID
-         LEFT JOIN Reviews r ON p.productID = r.productID
-         WHERE p.productID = ?
-         GROUP BY p.productID`
-      )
-      .get(id);
+  async getProductDetails(id) {
+    const productResult = await query(
+      `SELECT p.productID AS "productID", p.name, p.imageUrl AS "imageUrl", p.price, p.fabric, p.cut,
+         p.season, p.gsm, p.status, p.categoryID AS "categoryID",
+         c.name AS "categoryName", COALESCE(r.avgRating, 0) AS "avgRating"
+       FROM Products p
+       JOIN Categories c ON p.categoryID = c.categoryID
+       LEFT JOIN (
+        SELECT productID, ROUND(AVG(rating)::numeric, 2)::double precision AS avgRating
+         FROM Reviews
+         GROUP BY productID
+       ) r ON p.productID = r.productID
+       WHERE p.productID = $1`,
+      [id]
+    );
+    const product = productResult.rows[0];
 
     if (!product) {
       return null;
     }
 
-    const inventory = db
-      .prepare('SELECT * FROM Inventory WHERE productID = ? ORDER BY size')
-      .all(id);
+    const inventoryResult = await query(
+      'SELECT inventoryID AS "inventoryID", productID AS "productID", size, stockQty AS "stockQty", safetyStock AS "safetyStock" FROM Inventory WHERE productID = $1 ORDER BY size',
+      [id]
+    );
 
-    return { ...product, inventory };
+    return { ...product, inventory: inventoryResult.rows };
   }
 
-  update(id, payload) {
-    db
-      .prepare(
-        `UPDATE Products
-         SET name = ?, imageUrl = ?, price = ?, fabric = ?, cut = ?, season = ?, gsm = ?, status = ?, categoryID = ?
-         WHERE productID = ?`
-      )
-      .run(
+  async update(id, payload) {
+    await query(
+      `UPDATE Products
+       SET name = $1, imageUrl = $2, price = $3, fabric = $4, cut = $5, season = $6, gsm = $7, status = $8, categoryID = $9
+       WHERE productID = $10`,
+      [
         payload.name,
         payload.imageUrl || null,
         payload.price,
@@ -128,12 +139,13 @@ export default class ProductRepository extends IDataPersist {
         payload.status,
         payload.categoryID,
         id
-      );
+      ]
+    );
     return this.getById(id);
   }
 
-  softDelete(id) {
-    db.prepare("UPDATE Products SET status = 'discontinued' WHERE productID = ?").run(id);
+  async softDelete(id) {
+    await query("UPDATE Products SET status = 'discontinued' WHERE productID = $1", [id]);
     return this.getById(id);
   }
 

@@ -1,6 +1,6 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 
 import authRoutes from './src/routes/authRoutes.js';
 import productRoutes from './src/routes/productRoutes.js';
@@ -11,23 +11,14 @@ import orderRoutes from './src/routes/orderRoutes.js';
 import reviewRoutes from './src/routes/reviewRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
 
-import {
-  initializeDatabase,
-  seedDatabaseIfEmpty
-} from './src/db/database.js';
-
-dotenv.config();
-
 const app = express();
-
-initializeDatabase();
-seedDatabaseIfEmpty();
 
 app.use(
   cors({
     origin: [
       'https://se-proj-self.vercel.app',
-      'http://localhost:5173'
+      'http://localhost:5173',
+      'http://localhost:3000'
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true
@@ -49,6 +40,14 @@ app.get('/', (req, res) => {
   res.json({
     success: true,
     message: 'Backend API running'
+  });
+});
+
+app.get('/health', (req, res) => {
+  res.json({
+    success: true,
+    status: 'ok',
+    timestamp: new Date().toISOString()
   });
 });
 

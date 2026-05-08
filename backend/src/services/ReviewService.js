@@ -7,9 +7,9 @@ export default class ReviewService {
     this.productRepository = new ProductRepository();
   }
 
-  addReview(userID, payload) {
+  async addReview(userID, payload) {
     const { productId, rating, comment } = payload;
-    const product = this.productRepository.getById(productId);
+    const product = await this.productRepository.getById(productId);
     if (!product) {
       throw new Error('Product not found');
     }
@@ -25,14 +25,18 @@ export default class ReviewService {
     return this.reviewRepository.create({ userID, productID: Number(productId), rating: parsedRating, comment });
   }
 
-  getReviewsForProduct(productId) {
+  async getReviewsForProduct(productId) {
     return this.reviewRepository.getByProductId(productId);
   }
 
-  getInsights() {
+  async getInsights() {
+    const [avgRating, products] = await Promise.all([
+      this.reviewRepository.getOverallAverageRating(),
+      this.reviewRepository.getInsights()
+    ]);
     return {
-      avgRating: this.reviewRepository.getOverallAverageRating(),
-      products: this.reviewRepository.getInsights()
+      avgRating,
+      products
     };
   }
 }

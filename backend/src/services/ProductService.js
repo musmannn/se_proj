@@ -7,20 +7,20 @@ export default class ProductService {
     this.inventoryRepository = new InventoryRepository();
   }
 
-  getProducts(filters) {
+  async getProducts(filters) {
     return this.productRepository.getAll(filters);
   }
 
-  getProductById(id) {
-    const product = this.productRepository.getProductDetails(id);
+  async getProductById(id) {
+    const product = await this.productRepository.getProductDetails(id);
     if (!product) {
       throw new Error('Product not found');
     }
     return product;
   }
 
-  createProduct(payload) {
-    const product = this.productRepository.create({
+  async createProduct(payload) {
+    const product = await this.productRepository.create({
       name: payload.name,
       imageUrl: payload.imageUrl || null,
       price: Number(payload.price),
@@ -33,21 +33,21 @@ export default class ProductService {
     });
 
     if (Array.isArray(payload.inventory)) {
-      payload.inventory.forEach((item) => {
-        this.inventoryRepository.create({
+      for (const item of payload.inventory) {
+        await this.inventoryRepository.create({
           productID: product.productID,
           size: item.size,
           stockQty: Number(item.stockQty || 0),
           safetyStock: Number(item.safetyStock || 0)
         });
-      });
+      }
     }
 
     return this.productRepository.getProductDetails(product.productID);
   }
 
-  updateProduct(id, payload) {
-    const existing = this.productRepository.getById(id);
+  async updateProduct(id, payload) {
+    const existing = await this.productRepository.getById(id);
     if (!existing) {
       throw new Error('Product not found');
     }
@@ -65,8 +65,8 @@ export default class ProductService {
     });
   }
 
-  softDeleteProduct(id) {
-    const existing = this.productRepository.getById(id);
+  async softDeleteProduct(id) {
+    const existing = await this.productRepository.getById(id);
     if (!existing) {
       throw new Error('Product not found');
     }

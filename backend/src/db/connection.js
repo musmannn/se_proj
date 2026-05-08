@@ -1,12 +1,46 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { Pool } from 'pg';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const dbPath = path.join(__dirname, 'mtr.db');
+const connectionString =
+  process.env.DATABASE_URL || process.env.POSTGRES_URL;
 
-const db = new Database(dbPath);
-db.pragma('foreign_keys = ON');
+if (!connectionString) {
+  throw new Error('DATABASE_URL or POSTGRES_URL environment variable is required');
+}
 
-export default db;
+const shouldUseSsl =
+  process.env.PGSSLMODE !== 'disable' && !connectionString.includes('localhost');
+
+const pool =
+  globalThis.__pgPool ||
+  new Pool({
+    connectionString,
+    ssl: shouldUseSsl ? { rejectUnauthorized: false } : false,
+    max: 5,
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 10000
+  });
+
+if (!globalThis.__pgPool) {
+  globalThis.__pgPool = pool;
+}
+
+export function query(text, params = []) {
+  return pool.query(text, params);
+}
+
+export async function withTransaction(fn) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export default pool;

@@ -11,18 +11,18 @@ export default class CartService {
     this.productRepository = new ProductRepository();
   }
 
-  getCart(userID) {
+  async getCart(userID) {
     return this.cartRepository.getCartWithItemsByUserId(userID);
   }
 
-  addCartItem(userID, payload) {
-    const cart = this.cartRepository.getByUserId(userID);
-    const product = this.productRepository.getById(payload.productId);
+  async addCartItem(userID, payload) {
+    const cart = await this.cartRepository.getByUserId(userID);
+    const product = await this.productRepository.getById(payload.productId);
     if (!product || product.status === 'discontinued') {
       throw new Error('Product not available');
     }
 
-    const inventoryRows = this.inventoryRepository.getByProductId(payload.productId);
+    const inventoryRows = await this.inventoryRepository.getByProductId(payload.productId);
     const stockRow = inventoryRows.find((row) => row.size === payload.size);
     if (!stockRow) {
       throw new Error('Invalid size selection');
@@ -34,7 +34,7 @@ export default class CartService {
       throw new Error('Requested quantity exceeds stock');
     }
 
-    this.cartItemRepository.create({
+    await this.cartItemRepository.create({
       cartID: cart.cartID,
       productID: Number(payload.productId),
       quantity: Number(payload.quantity),
@@ -44,14 +44,14 @@ export default class CartService {
     return this.getCart(userID);
   }
 
-  updateCartItem(userID, cartItemId, payload) {
-    const cart = this.cartRepository.getByUserId(userID);
-    const cartItem = this.cartItemRepository.getById(cartItemId);
+  async updateCartItem(userID, cartItemId, payload) {
+    const cart = await this.cartRepository.getByUserId(userID);
+    const cartItem = await this.cartItemRepository.getById(cartItemId);
     if (!cartItem || cartItem.cartID !== cart.cartID) {
       throw new Error('Cart item not found');
     }
 
-    const inventoryRows = this.inventoryRepository.getByProductId(cartItem.productID);
+    const inventoryRows = await this.inventoryRepository.getByProductId(cartItem.productID);
     const stockRow = inventoryRows.find((row) => row.size === cartItem.size);
     if (!stockRow) {
       throw new Error('Inventory record not found');
@@ -65,17 +65,17 @@ export default class CartService {
       throw new Error('Requested quantity exceeds stock');
     }
 
-    this.cartItemRepository.update(cartItemId, { quantity });
+    await this.cartItemRepository.update(cartItemId, { quantity });
     return this.getCart(userID);
   }
 
-  removeCartItem(userID, cartItemId) {
-    const cart = this.cartRepository.getByUserId(userID);
-    const cartItem = this.cartItemRepository.getById(cartItemId);
+  async removeCartItem(userID, cartItemId) {
+    const cart = await this.cartRepository.getByUserId(userID);
+    const cartItem = await this.cartItemRepository.getById(cartItemId);
     if (!cartItem || cartItem.cartID !== cart.cartID) {
       throw new Error('Cart item not found');
     }
-    this.cartItemRepository.delete(cartItemId);
+    await this.cartItemRepository.delete(cartItemId);
     return this.getCart(userID);
   }
 }

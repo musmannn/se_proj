@@ -9,29 +9,29 @@ export default class AuthService {
     this.userRepository = new UserRepository();
   }
 
-  register(payload) {
+  async register(payload) {
     const { name, email, password } = payload;
     if (!name || !email || !password) {
       throw new Error('Name, email and password are required');
     }
 
-    const existing = this.userRepository.getByEmail(email);
+    const existing = await this.userRepository.getByEmail(email);
     if (existing) {
       throw new Error('Email already registered');
     }
 
     const passwordHash = bcrypt.hashSync(password, SALT_ROUNDS);
-    const user = this.userRepository.create({ name, email, passwordHash, role: 'customer' });
+    const user = await this.userRepository.create({ name, email, passwordHash, role: 'customer' });
     return user;
   }
 
-  login(payload) {
+  async login(payload) {
     const { email, password } = payload;
     if (!email || !password) {
       throw new Error('Email and password are required');
     }
 
-    const user = this.userRepository.getByEmail(email);
+    const user = await this.userRepository.getByEmail(email);
     if (!user) {
       throw new Error('Invalid credentials');
     }
@@ -58,16 +58,16 @@ export default class AuthService {
     };
   }
 
-  getProfile(userID) {
-    const user = this.userRepository.getById(userID);
+  async getProfile(userID) {
+    const user = await this.userRepository.getById(userID);
     if (!user) {
       throw new Error('User not found');
     }
     return user;
   }
 
-  updateProfile(userID, payload) {
-    const existing = this.userRepository.getById(userID);
+  async updateProfile(userID, payload) {
+    const existing = await this.userRepository.getById(userID);
     if (!existing) {
       throw new Error('User not found');
     }
@@ -75,30 +75,31 @@ export default class AuthService {
     const name = payload.name || existing.name;
     const email = payload.email || existing.email;
     if (email !== existing.email) {
-      const inUse = this.userRepository.getByEmail(email);
+      const inUse = await this.userRepository.getByEmail(email);
       if (inUse && inUse.userID !== userID) {
         throw new Error('Email already in use');
       }
     }
 
-    const updated = this.userRepository.update(userID, { name, email });
+    const updated = await this.userRepository.update(userID, { name, email });
     return updated;
   }
 
-  updatePassword(userID, payload) {
+  async updatePassword(userID, payload) {
     const { currentPassword, newPassword } = payload;
     if (!currentPassword || !newPassword) {
       throw new Error('Current and new password are required');
     }
 
-    const fullUser = this.userRepository.getByEmail(this.userRepository.getById(userID).email);
+    const current = await this.userRepository.getById(userID);
+    const fullUser = await this.userRepository.getByEmail(current.email);
     const matches = bcrypt.compareSync(currentPassword, fullUser.passwordHash);
     if (!matches) {
       throw new Error('Current password is incorrect');
     }
 
     const passwordHash = bcrypt.hashSync(newPassword, SALT_ROUNDS);
-    this.userRepository.updatePassword(userID, passwordHash);
+    await this.userRepository.updatePassword(userID, passwordHash);
     return true;
   }
 }

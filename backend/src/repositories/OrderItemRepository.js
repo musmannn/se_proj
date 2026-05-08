@@ -1,44 +1,54 @@
-import db from '../db/connection.js';
+import { query } from '../db/connection.js';
 import IDataPersist from './IDataPersist.js';
 
 export default class OrderItemRepository extends IDataPersist {
-  create(payload) {
-    const result = db
-      .prepare(
-        'INSERT INTO OrderItems (orderID, productID, quantity, unitPrice, size) VALUES (?, ?, ?, ?, ?)'
-      )
-      .run(payload.orderID, payload.productID, payload.quantity, payload.unitPrice, payload.size);
-    return this.getById(result.lastInsertRowid);
+  async create(payload) {
+    const result = await query(
+      'INSERT INTO OrderItems (orderID, productID, quantity, unitPrice, size) VALUES ($1, $2, $3, $4, $5) RETURNING orderItemID AS "orderItemID", orderID AS "orderID", productID AS "productID", quantity, unitPrice AS "unitPrice", size',
+      [payload.orderID, payload.productID, payload.quantity, payload.unitPrice, payload.size]
+    );
+    return result.rows[0];
   }
 
-  getById(id) {
-    return db.prepare('SELECT * FROM OrderItems WHERE orderItemID = ?').get(id);
+  async getById(id) {
+    const result = await query(
+      'SELECT orderItemID AS "orderItemID", orderID AS "orderID", productID AS "productID", quantity, unitPrice AS "unitPrice", size FROM OrderItems WHERE orderItemID = $1',
+      [id]
+    );
+    return result.rows[0] || null;
   }
 
-  getByOrderId(orderID) {
-    return db
-      .prepare(
-        `SELECT oi.*, p.name as productName
-         FROM OrderItems oi
-         JOIN Products p ON oi.productID = p.productID
-         WHERE oi.orderID = ?`
-      )
-      .all(orderID);
+  async getByOrderId(orderID) {
+    const result = await query(
+      `SELECT oi.orderItemID AS "orderItemID", oi.orderID AS "orderID", oi.productID AS "productID",
+         oi.quantity, oi.unitPrice AS "unitPrice", oi.size, p.name AS "productName"
+       FROM OrderItems oi
+       JOIN Products p ON oi.productID = p.productID
+       WHERE oi.orderID = $1`,
+      [orderID]
+    );
+    return result.rows;
   }
 
-  getAll() {
-    return db.prepare('SELECT * FROM OrderItems').all();
+  async getAll() {
+    const result = await query(
+      'SELECT orderItemID AS "orderItemID", orderID AS "orderID", productID AS "productID", quantity, unitPrice AS "unitPrice", size FROM OrderItems'
+    );
+    return result.rows;
   }
 
-  update(id, payload) {
-    db
-      .prepare('UPDATE OrderItems SET quantity = ?, unitPrice = ?, size = ? WHERE orderItemID = ?')
-      .run(payload.quantity, payload.unitPrice, payload.size, id);
+  async update(id, payload) {
+    await query('UPDATE OrderItems SET quantity = $1, unitPrice = $2, size = $3 WHERE orderItemID = $4', [
+      payload.quantity,
+      payload.unitPrice,
+      payload.size,
+      id
+    ]);
     return this.getById(id);
   }
 
-  delete(id) {
-    db.prepare('DELETE FROM OrderItems WHERE orderItemID = ?').run(id);
+  async delete(id) {
+    await query('DELETE FROM OrderItems WHERE orderItemID = $1', [id]);
     return true;
   }
 }

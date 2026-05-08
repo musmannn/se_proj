@@ -1,44 +1,59 @@
-import db from '../db/connection.js';
+import { query } from '../db/connection.js';
 import IDataPersist from './IDataPersist.js';
 
 export default class CartItemRepository extends IDataPersist {
-  create(payload) {
-    const existing = db
-      .prepare('SELECT * FROM CartItems WHERE cartID = ? AND productID = ? AND size = ?')
-      .get(payload.cartID, payload.productID, payload.size);
+  async create(payload) {
+    const existingResult = await query(
+      'SELECT cartItemID AS "cartItemID", cartID AS "cartID", productID AS "productID", quantity, size FROM CartItems WHERE cartID = $1 AND productID = $2 AND size = $3',
+      [payload.cartID, payload.productID, payload.size]
+    );
+    const existing = existingResult.rows[0];
 
     if (existing) {
-      db
-        .prepare('UPDATE CartItems SET quantity = quantity + ? WHERE cartItemID = ?')
-        .run(payload.quantity, existing.cartItemID);
+      await query('UPDATE CartItems SET quantity = quantity + $1 WHERE cartItemID = $2', [
+        payload.quantity,
+        existing.cartItemID
+      ]);
       return this.getById(existing.cartItemID);
     }
 
-    const result = db
-      .prepare('INSERT INTO CartItems (cartID, productID, quantity, size) VALUES (?, ?, ?, ?)')
-      .run(payload.cartID, payload.productID, payload.quantity, payload.size);
-    return this.getById(result.lastInsertRowid);
+    const result = await query(
+      'INSERT INTO CartItems (cartID, productID, quantity, size) VALUES ($1, $2, $3, $4) RETURNING cartItemID AS "cartItemID", cartID AS "cartID", productID AS "productID", quantity, size',
+      [payload.cartID, payload.productID, payload.quantity, payload.size]
+    );
+    return result.rows[0];
   }
 
-  getById(id) {
-    return db.prepare('SELECT * FROM CartItems WHERE cartItemID = ?').get(id);
+  async getById(id) {
+    const result = await query(
+      'SELECT cartItemID AS "cartItemID", cartID AS "cartID", productID AS "productID", quantity, size FROM CartItems WHERE cartItemID = $1',
+      [id]
+    );
+    return result.rows[0] || null;
   }
 
-  getByCartId(cartID) {
-    return db.prepare('SELECT * FROM CartItems WHERE cartID = ?').all(cartID);
+  async getByCartId(cartID) {
+    const result = await query(
+      'SELECT cartItemID AS "cartItemID", cartID AS "cartID", productID AS "productID", quantity, size FROM CartItems WHERE cartID = $1',
+      [cartID]
+    );
+    return result.rows;
   }
 
-  getAll() {
-    return db.prepare('SELECT * FROM CartItems').all();
+  async getAll() {
+    const result = await query(
+      'SELECT cartItemID AS "cartItemID", cartID AS "cartID", productID AS "productID", quantity, size FROM CartItems'
+    );
+    return result.rows;
   }
 
-  update(id, payload) {
-    db.prepare('UPDATE CartItems SET quantity = ? WHERE cartItemID = ?').run(payload.quantity, id);
+  async update(id, payload) {
+    await query('UPDATE CartItems SET quantity = $1 WHERE cartItemID = $2', [payload.quantity, id]);
     return this.getById(id);
   }
 
-  delete(id) {
-    db.prepare('DELETE FROM CartItems WHERE cartItemID = ?').run(id);
+  async delete(id) {
+    await query('DELETE FROM CartItems WHERE cartItemID = $1', [id]);
     return true;
   }
 }

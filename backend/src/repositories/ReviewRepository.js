@@ -1,75 +1,83 @@
-import db from '../db/connection.js';
+import { query } from '../db/connection.js';
 import IDataPersist from './IDataPersist.js';
 
 export default class ReviewRepository extends IDataPersist {
-  create(payload) {
-    const result = db
-      .prepare(
-        'INSERT INTO Reviews (userID, productID, rating, comment, reviewDate) VALUES (?, ?, ?, ?, ?)'
-      )
-      .run(payload.userID, payload.productID, payload.rating, payload.comment, new Date().toISOString());
-    return this.getById(result.lastInsertRowid);
+  async create(payload) {
+    const result = await query(
+      'INSERT INTO Reviews (userID, productID, rating, comment, reviewDate) VALUES ($1, $2, $3, $4, $5) RETURNING reviewID AS "reviewID", userID AS "userID", productID AS "productID", rating, comment, reviewDate AS "reviewDate"',
+      [payload.userID, payload.productID, payload.rating, payload.comment, new Date().toISOString()]
+    );
+    return result.rows[0];
   }
 
-  getById(id) {
-    return db.prepare('SELECT * FROM Reviews WHERE reviewID = ?').get(id);
+  async getById(id) {
+    const result = await query(
+      'SELECT reviewID AS "reviewID", userID AS "userID", productID AS "productID", rating, comment, reviewDate AS "reviewDate" FROM Reviews WHERE reviewID = $1',
+      [id]
+    );
+    return result.rows[0] || null;
   }
 
-  getAll() {
-    return db
-      .prepare(
-        `SELECT r.*, u.name as userName, p.name as productName
-         FROM Reviews r
-         JOIN Users u ON r.userID = u.userID
-         JOIN Products p ON r.productID = p.productID
-         ORDER BY r.reviewDate DESC`
-      )
-      .all();
+  async getAll() {
+    const result = await query(
+      `SELECT r.reviewID AS "reviewID", r.userID AS "userID", r.productID AS "productID",
+         r.rating, r.comment, r.reviewDate AS "reviewDate",
+         u.name AS "userName", p.name AS "productName"
+       FROM Reviews r
+       JOIN Users u ON r.userID = u.userID
+       JOIN Products p ON r.productID = p.productID
+       ORDER BY r.reviewDate DESC`
+    );
+    return result.rows;
   }
 
-  getByProductId(productID) {
-    return db
-      .prepare(
-        `SELECT r.reviewID, r.productID, r.rating, r.comment, r.reviewDate,
-         u.userID, u.name as userName
-         FROM Reviews r
-         JOIN Users u ON r.userID = u.userID
-         WHERE r.productID = ?
-         ORDER BY r.reviewDate DESC`
-      )
-      .all(productID);
+  async getByProductId(productID) {
+    const result = await query(
+      `SELECT r.reviewID AS "reviewID", r.productID AS "productID", r.rating, r.comment,
+         r.reviewDate AS "reviewDate", u.userID AS "userID", u.name AS "userName"
+       FROM Reviews r
+       JOIN Users u ON r.userID = u.userID
+       WHERE r.productID = $1
+       ORDER BY r.reviewDate DESC`,
+      [productID]
+    );
+    return result.rows;
   }
 
-  getInsights() {
-    return db
-      .prepare(
-        `SELECT p.productID, p.name,
-         COALESCE(ROUND(AVG(r.rating), 2), 0) as avgRating,
-         COUNT(r.reviewID) as reviewCount
-         FROM Products p
-         LEFT JOIN Reviews r ON p.productID = r.productID
-         GROUP BY p.productID
-         ORDER BY avgRating DESC, reviewCount DESC, p.name`
-      )
-      .all();
+  async getInsights() {
+    const result = await query(
+      `SELECT p.productID AS "productID", p.name,
+         COALESCE(r.avgRating, 0) AS "avgRating",
+         COALESCE(r.reviewCount, 0) AS "reviewCount"
+       FROM Products p
+       LEFT JOIN (
+        SELECT productID, ROUND(AVG(rating)::numeric, 2)::double precision AS avgRating, COUNT(reviewID) AS reviewCount
+         FROM Reviews
+         GROUP BY productID
+       ) r ON p.productID = r.productID
+       ORDER BY "avgRating" DESC, "reviewCount" DESC, p.name`
+    );
+    return result.rows;
   }
 
-  getOverallAverageRating() {
-    const row = db
-      .prepare('SELECT COALESCE(ROUND(AVG(rating), 2), 0) as avgRating FROM Reviews')
-      .get();
-    return row.avgRating;
+  async getOverallAverageRating() {
+    const result = await query(
+      'SELECT COALESCE(ROUND(AVG(rating)::numeric, 2)::double precision, 0) AS "avgRating" FROM Reviews'
+    );
+    return result.rows[0]?.avgRating ?? 0;
   }
 
-  update(id, payload) {
-    db
-      .prepare('UPDATE Reviews SET rating = ?, comment = ? WHERE reviewID = ?')
-      .run(payload.rating, payload.comment, id);
+  async update(id, payload) {
+    await query('UPDATE Reviews SET rating = $1, comment = $2 WHERE reviewID = $3', [
+      payload.rating,
+      payload.comment,
+      id
+    ]);
     return this.getById(id);
   }
 
-  delete(id) {
-    db.prepare('DELETE FROM Reviews WHERE reviewID = ?').run(id);
+  async delete(id) {
+    await query('DELETE FROM Reviews WHERE reviewID = $1', [id]);
     return true;
   }
 }

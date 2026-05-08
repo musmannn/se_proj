@@ -1,62 +1,70 @@
-import db from '../db/connection.js';
+import { query } from '../db/connection.js';
 import IDataPersist from './IDataPersist.js';
 
 export default class CartRepository extends IDataPersist {
-  create(payload) {
-    const result = db
-      .prepare('INSERT INTO Cart (userID, createdAt) VALUES (?, ?)')
-      .run(payload.userID, payload.createdAt || new Date().toISOString());
-    return this.getById(result.lastInsertRowid);
+  async create(payload) {
+    const result = await query(
+      'INSERT INTO Cart (userID, createdAt) VALUES ($1, $2) RETURNING cartID AS "cartID", userID AS "userID", createdAt AS "createdAt"',
+      [payload.userID, payload.createdAt || new Date().toISOString()]
+    );
+    return result.rows[0];
   }
 
-  getById(id) {
-    return db.prepare('SELECT * FROM Cart WHERE cartID = ?').get(id);
+  async getById(id) {
+    const result = await query('SELECT cartID AS "cartID", userID AS "userID", createdAt AS "createdAt" FROM Cart WHERE cartID = $1', [id]);
+    return result.rows[0] || null;
   }
 
-  getByUserId(userID) {
-    const cart = db.prepare('SELECT * FROM Cart WHERE userID = ?').get(userID);
+  async getByUserId(userID) {
+    const result = await query(
+      'SELECT cartID AS "cartID", userID AS "userID", createdAt AS "createdAt" FROM Cart WHERE userID = $1',
+      [userID]
+    );
+    const cart = result.rows[0];
     if (cart) {
       return cart;
     }
     return this.create({ userID });
   }
 
-  getAll() {
-    return db.prepare('SELECT * FROM Cart').all();
+  async getAll() {
+    const result = await query('SELECT cartID AS "cartID", userID AS "userID", createdAt AS "createdAt" FROM Cart');
+    return result.rows;
   }
 
-  getCartWithItemsByUserId(userID) {
-    const cart = this.getByUserId(userID);
-    const items = db
-      .prepare(
-        `SELECT ci.cartItemID, ci.cartID, ci.productID, ci.quantity, ci.size,
-         p.name as productName, p.price, p.status, c.name as categoryName,
-         i.stockQty
-         FROM CartItems ci
-         JOIN Products p ON ci.productID = p.productID
-         JOIN Categories c ON p.categoryID = c.categoryID
-         LEFT JOIN Inventory i ON i.productID = ci.productID AND i.size = ci.size
-         WHERE ci.cartID = ?
-         ORDER BY ci.cartItemID DESC`
-      )
-      .all(cart.cartID);
+  async getCartWithItemsByUserId(userID) {
+    const cart = await this.getByUserId(userID);
+    const itemsResult = await query(
+      `SELECT ci.cartItemID AS "cartItemID", ci.cartID AS "cartID", ci.productID AS "productID",
+         ci.quantity, ci.size,
+         p.name AS "productName", p.price, p.status, c.name AS "categoryName",
+         i.stockQty AS "stockQty"
+       FROM CartItems ci
+       JOIN Products p ON ci.productID = p.productID
+       JOIN Categories c ON p.categoryID = c.categoryID
+       LEFT JOIN Inventory i ON i.productID = ci.productID AND i.size = ci.size
+       WHERE ci.cartID = $1
+       ORDER BY ci.cartItemID DESC`,
+      [cart.cartID]
+    );
+    const items = itemsResult.rows;
 
     const total = items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
     return { ...cart, items, total: Number(total.toFixed(2)) };
   }
 
-  update(id, payload) {
-    db.prepare('UPDATE Cart SET createdAt = ? WHERE cartID = ?').run(payload.createdAt, id);
+  async update(id, payload) {
+    await query('UPDATE Cart SET createdAt = $1 WHERE cartID = $2', [payload.createdAt, id]);
     return this.getById(id);
   }
 
-  clearCart(cartID) {
-    db.prepare('DELETE FROM CartItems WHERE cartID = ?').run(cartID);
+  async clearCart(cartID) {
+    await query('DELETE FROM CartItems WHERE cartID = $1', [cartID]);
     return true;
   }
 
-  delete(id) {
-    db.prepare('DELETE FROM Cart WHERE cartID = ?').run(id);
+  async delete(id) {
+    await query('DELETE FROM Cart WHERE cartID = $1', [id]);
     return true;
   }
 }

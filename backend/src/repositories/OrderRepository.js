@@ -1,123 +1,146 @@
-import db from '../db/connection.js';
+import { query, withTransaction } from '../db/connection.js';
 import IDataPersist from './IDataPersist.js';
 
 export default class OrderRepository extends IDataPersist {
-  create(payload) {
-    const result = db
-      .prepare(
-        'INSERT INTO Orders (userID, orderDate, totalAmount, status, shippingAddr) VALUES (?, ?, ?, ?, ?)'
-      )
-      .run(
+  async create(payload) {
+    const result = await query(
+      'INSERT INTO Orders (userID, orderDate, totalAmount, status, shippingAddr) VALUES ($1, $2, $3, $4, $5) RETURNING orderID AS "orderID", userID AS "userID", orderDate AS "orderDate", totalAmount AS "totalAmount", status, shippingAddr AS "shippingAddr"',
+      [
         payload.userID,
         payload.orderDate || new Date().toISOString(),
         payload.totalAmount,
         payload.status || 'pending',
         payload.shippingAddr
-      );
-    return this.getById(result.lastInsertRowid);
+      ]
+    );
+    return result.rows[0];
   }
 
-  getById(id) {
-    return db.prepare('SELECT * FROM Orders WHERE orderID = ?').get(id);
+  async getById(id) {
+    const result = await query(
+      'SELECT orderID AS "orderID", userID AS "userID", orderDate AS "orderDate", totalAmount AS "totalAmount", status, shippingAddr AS "shippingAddr" FROM Orders WHERE orderID = $1',
+      [id]
+    );
+    return result.rows[0] || null;
   }
 
-  getDetailById(id) {
-    const order = db
-      .prepare(
-        `SELECT o.*, u.name as customerName, u.email as customerEmail
-         FROM Orders o
-         JOIN Users u ON o.userID = u.userID
-         WHERE o.orderID = ?`
-      )
-      .get(id);
+  async getDetailById(id) {
+    const orderResult = await query(
+      `SELECT o.orderID AS "orderID", o.userID AS "userID", o.orderDate AS "orderDate",
+         o.totalAmount AS "totalAmount", o.status, o.shippingAddr AS "shippingAddr",
+         u.name AS "customerName", u.email AS "customerEmail"
+       FROM Orders o
+       JOIN Users u ON o.userID = u.userID
+       WHERE o.orderID = $1`,
+      [id]
+    );
+    const order = orderResult.rows[0];
 
     if (!order) {
       return null;
     }
 
-    const items = db
-      .prepare(
-        `SELECT oi.*, p.name as productName
-         FROM OrderItems oi
-         JOIN Products p ON oi.productID = p.productID
-         WHERE oi.orderID = ?`
-      )
-      .all(id);
+    const itemsResult = await query(
+      `SELECT oi.orderItemID AS "orderItemID", oi.orderID AS "orderID", oi.productID AS "productID",
+         oi.quantity, oi.unitPrice AS "unitPrice", oi.size, p.name AS "productName"
+       FROM OrderItems oi
+       JOIN Products p ON oi.productID = p.productID
+       WHERE oi.orderID = $1`,
+      [id]
+    );
 
-    return { ...order, items };
+    return { ...order, items: itemsResult.rows };
   }
 
-  getByUserId(userID) {
-    return db
-      .prepare('SELECT * FROM Orders WHERE userID = ? ORDER BY orderDate DESC')
-      .all(userID);
+  async getByUserId(userID) {
+    const result = await query(
+      'SELECT orderID AS "orderID", userID AS "userID", orderDate AS "orderDate", totalAmount AS "totalAmount", status, shippingAddr AS "shippingAddr" FROM Orders WHERE userID = $1 ORDER BY orderDate DESC',
+      [userID]
+    );
+    return result.rows;
   }
 
-  getAll() {
-    return db
-      .prepare(
-        `SELECT o.*, u.name as customerName, u.email as customerEmail
-         FROM Orders o
-         JOIN Users u ON o.userID = u.userID
-         ORDER BY o.orderDate DESC`
-      )
-      .all();
+  async getAll() {
+    const result = await query(
+      `SELECT o.orderID AS "orderID", o.userID AS "userID", o.orderDate AS "orderDate",
+         o.totalAmount AS "totalAmount", o.status, o.shippingAddr AS "shippingAddr",
+         u.name AS "customerName", u.email AS "customerEmail"
+       FROM Orders o
+       JOIN Users u ON o.userID = u.userID
+       ORDER BY o.orderDate DESC`
+    );
+    return result.rows;
   }
 
-  update(id, payload) {
-    db
-      .prepare('UPDATE Orders SET totalAmount = ?, status = ?, shippingAddr = ? WHERE orderID = ?')
-      .run(payload.totalAmount, payload.status, payload.shippingAddr, id);
+  async update(id, payload) {
+    await query('UPDATE Orders SET totalAmount = $1, status = $2, shippingAddr = $3 WHERE orderID = $4', [
+      payload.totalAmount,
+      payload.status,
+      payload.shippingAddr,
+      id
+    ]);
     return this.getById(id);
   }
 
-  updateStatus(id, status) {
-    db.prepare('UPDATE Orders SET status = ? WHERE orderID = ?').run(status, id);
+  async updateStatus(id, status) {
+    await query('UPDATE Orders SET status = $1 WHERE orderID = $2', [status, id]);
     return this.getById(id);
   }
 
-  cancelAndRestock(orderId) {
-    const run = db.transaction((targetOrderId) => {
-      const order = db.prepare('SELECT * FROM Orders WHERE orderID = ?').get(targetOrderId);
+  async cancelAndRestock(orderId) {
+    return withTransaction(async (client) => {
+      const orderResult = await client.query(
+        'SELECT orderID AS "orderID", userID AS "userID", status FROM Orders WHERE orderID = $1',
+        [orderId]
+      );
+      const order = orderResult.rows[0];
       if (!order) {
         throw new Error('Order not found');
       }
 
-      const items = db
-        .prepare('SELECT productID, size, quantity FROM OrderItems WHERE orderID = ?')
-        .all(targetOrderId);
-
-      const incrementStock = db.prepare(
-        'UPDATE Inventory SET stockQty = stockQty + ? WHERE productID = ? AND size = ?'
+      const itemsResult = await client.query(
+        'SELECT productID AS "productID", size, quantity FROM OrderItems WHERE orderID = $1',
+        [orderId]
       );
 
-      for (const item of items) {
-        incrementStock.run(item.quantity, item.productID, item.size);
+      for (const item of itemsResult.rows) {
+        await client.query('UPDATE Inventory SET stockQty = stockQty + $1 WHERE productID = $2 AND size = $3', [
+          item.quantity,
+          item.productID,
+          item.size
+        ]);
       }
 
-      db.prepare("UPDATE Orders SET status = 'cancelled' WHERE orderID = ?").run(targetOrderId);
-      return this.getById(targetOrderId);
+      await client.query("UPDATE Orders SET status = 'cancelled' WHERE orderID = $1", [orderId]);
+      const updated = await client.query(
+        'SELECT orderID AS "orderID", userID AS "userID", orderDate AS "orderDate", totalAmount AS "totalAmount", status, shippingAddr AS "shippingAddr" FROM Orders WHERE orderID = $1',
+        [orderId]
+      );
+      return updated.rows[0];
     });
-
-    return run(orderId);
   }
 
-  checkout({ userID, shippingAddr }) {
-    const runCheckout = db.transaction(({ userID: checkoutUserID, shippingAddr: checkoutShippingAddr }) => {
-      const cart = db.prepare('SELECT * FROM Cart WHERE userID = ?').get(checkoutUserID);
+  async checkout({ userID, shippingAddr }) {
+    const orderId = await withTransaction(async (client) => {
+      const cartResult = await client.query(
+        'SELECT cartID AS "cartID", userID AS "userID" FROM Cart WHERE userID = $1',
+        [userID]
+      );
+      const cart = cartResult.rows[0];
       if (!cart) {
         throw new Error('Cart not found');
       }
 
-      const cartItems = db
-        .prepare(
-          `SELECT ci.*, p.price, p.name as productName, i.stockQty
-           FROM CartItems ci
-           JOIN Products p ON ci.productID = p.productID
-           JOIN Inventory i ON i.productID = ci.productID AND i.size = ci.size
-           WHERE ci.cartID = ?`
-        )
-        .all(cart.cartID);
+      const cartItemsResult = await client.query(
+        `SELECT ci.cartItemID AS "cartItemID", ci.cartID AS "cartID", ci.productID AS "productID",
+           ci.quantity, ci.size, p.price, p.name AS "productName", i.stockQty AS "stockQty"
+         FROM CartItems ci
+         JOIN Products p ON ci.productID = p.productID
+         JOIN Inventory i ON i.productID = ci.productID AND i.size = ci.size
+         WHERE ci.cartID = $1`,
+        [cart.cartID]
+      );
+      const cartItems = cartItemsResult.rows;
 
       if (!cartItems.length) {
         throw new Error('Cart is empty');
@@ -129,37 +152,35 @@ export default class OrderRepository extends IDataPersist {
         }
       }
 
-      const totalAmount = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      const totalAmount = cartItems.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
 
-      const orderResult = db
-        .prepare(
-          'INSERT INTO Orders (userID, orderDate, totalAmount, status, shippingAddr) VALUES (?, ?, ?, ?, ?)'
-        )
-        .run(checkoutUserID, new Date().toISOString(), totalAmount, 'pending', checkoutShippingAddr);
-
-      const orderID = orderResult.lastInsertRowid;
-
-      const insertOrderItem = db.prepare(
-        'INSERT INTO OrderItems (orderID, productID, quantity, unitPrice, size) VALUES (?, ?, ?, ?, ?)'
+      const orderResult = await client.query(
+        'INSERT INTO Orders (userID, orderDate, totalAmount, status, shippingAddr) VALUES ($1, $2, $3, $4, $5) RETURNING orderID AS "orderID"',
+        [userID, new Date().toISOString(), totalAmount, 'pending', shippingAddr]
       );
-      const decrementStock = db.prepare(
-        'UPDATE Inventory SET stockQty = stockQty - ? WHERE productID = ? AND size = ?'
-      );
+      const orderID = orderResult.rows[0].orderID;
 
       for (const item of cartItems) {
-        insertOrderItem.run(orderID, item.productID, item.quantity, item.price, item.size);
-        decrementStock.run(item.quantity, item.productID, item.size);
+        await client.query(
+          'INSERT INTO OrderItems (orderID, productID, quantity, unitPrice, size) VALUES ($1, $2, $3, $4, $5)',
+          [orderID, item.productID, item.quantity, item.price, item.size]
+        );
+        await client.query('UPDATE Inventory SET stockQty = stockQty - $1 WHERE productID = $2 AND size = $3', [
+          item.quantity,
+          item.productID,
+          item.size
+        ]);
       }
 
-      db.prepare('DELETE FROM CartItems WHERE cartID = ?').run(cart.cartID);
-      return this.getDetailById(orderID);
+      await client.query('DELETE FROM CartItems WHERE cartID = $1', [cart.cartID]);
+      return orderID;
     });
 
-    return runCheckout({ userID, shippingAddr });
+    return this.getDetailById(orderId);
   }
 
-  delete(id) {
-    db.prepare('DELETE FROM Orders WHERE orderID = ?').run(id);
+  async delete(id) {
+    await query('DELETE FROM Orders WHERE orderID = $1', [id]);
     return true;
   }
 }

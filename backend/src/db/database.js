@@ -1,14 +1,17 @@
 import fs from 'fs';
 import path from 'path';
-import bcrypt from 'bcrypt';
 import { fileURLToPath } from 'url';
-import db from './connection.js';
+import dotenv from 'dotenv';
+import bcrypt from 'bcrypt';
+import { query } from './connection.js';
 import UserRepository from '../repositories/UserRepository.js';
 import CategoryRepository from '../repositories/CategoryRepository.js';
 import ProductRepository from '../repositories/ProductRepository.js';
 import InventoryRepository from '../repositories/InventoryRepository.js';
 import CartRepository from '../repositories/CartRepository.js';
 import ReviewRepository from '../repositories/ReviewRepository.js';
+
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,7 +28,7 @@ const categoriesSeed = [
 const productsSeed = [
   { name: 'Oxford White Shirt', imageUrl: 'https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?auto=format&fit=crop&w=1000&q=80', price: 79.99, fabric: 'Cotton', cut: 'slim', season: 'All Season', gsm: 140, status: 'new_arrival', category: 'Shirts' },
   { name: 'Linen Sky Shirt', imageUrl: 'https://images.unsplash.com/photo-1596755094514-f87e34085b2c?auto=format&fit=crop&w=1000&q=80', price: 69.5, fabric: 'Linen', cut: 'regular', season: 'Summer', gsm: 120, status: 'active', category: 'Shirts' },
-  { name: 'Stretch Navy Trouser', imageUrl: 'https://images.unsplash.com/photo-1473966968600-fa801b869a1a?auto=format&fit=crop&w=1000&q=80', price: 99.99, fabric: 'Cotton Blend', cut: 'athletic', season: 'All Season', gsm: 210, status: 'active', category: 'Trousers' },
+  { name: 'Stretch Navy Trouser', imageUrl: 'https://images.unsplash.com/photo-1473966968600-fa801b7a26db4?auto=format&fit=crop&w=1000&q=80', price: 99.99, fabric: 'Cotton Blend', cut: 'athletic', season: 'All Season', gsm: 210, status: 'active', category: 'Trousers' },
   { name: 'Classic Charcoal Trouser', imageUrl: 'https://images.unsplash.com/photo-1506629905607-d405b7a26db4?auto=format&fit=crop&w=1000&q=80', price: 109.99, fabric: 'Wool Blend', cut: 'regular', season: 'Winter', gsm: 260, status: 'active', category: 'Trousers' },
   { name: 'Tech Bomber Jacket', imageUrl: 'https://images.unsplash.com/photo-1521223890158-f9f7c3d5d504?auto=format&fit=crop&w=1000&q=80', price: 179.0, fabric: 'Poly Blend', cut: 'slim', season: 'Fall', gsm: 300, status: 'new_arrival', category: 'Jackets' },
   { name: 'Wool Blend Blazer', imageUrl: 'https://images.unsplash.com/photo-1593032465171-8bdc6f4a2f7e?auto=format&fit=crop&w=1000&q=80', price: 249.0, fabric: 'Wool', cut: 'athletic', season: 'Winter', gsm: 320, status: 'active', category: 'Jackets' },
@@ -49,19 +52,23 @@ const reviewSeed = [
   { email: 'ali@mtr.com', product: 'Leather Belt Brown', rating: 5, comment: 'Solid leather and elegant finish' }
 ];
 
-export function initializeDatabase() {
-  const schemaPath = path.join(__dirname, 'schema.sql');
-  const schema = fs.readFileSync(schemaPath, 'utf-8');
-  db.exec(schema);
+function splitStatements(sql) {
+  return sql
+    .split(';')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
-  const productColumns = db.prepare('PRAGMA table_info(Products)').all();
-  const hasImageUrl = productColumns.some((column) => column.name === 'imageUrl');
-  if (!hasImageUrl) {
-    db.exec('ALTER TABLE Products ADD COLUMN imageUrl TEXT');
+export async function runMigrations() {
+  const schemaPath = path.join(__dirname, 'schema.pg.sql');
+  const schema = fs.readFileSync(schemaPath, 'utf-8');
+  const statements = splitStatements(schema);
+  for (const stmt of statements) {
+    await query(stmt);
   }
 }
 
-export function seedDatabaseIfEmpty() {
+export async function seedDatabaseIfEmpty() {
   const userRepository = new UserRepository();
   const categoryRepository = new CategoryRepository();
   const productRepository = new ProductRepository();
@@ -73,37 +80,42 @@ export function seedDatabaseIfEmpty() {
   const customerHash1 = bcrypt.hashSync('customer123', SALT_ROUNDS);
   const customerHash2 = bcrypt.hashSync('customer456', SALT_ROUNDS);
 
-  const currentUsers = userRepository.getAll();
+  const currentUsers = await userRepository.getAll();
   const usersByEmail = currentUsers.reduce((acc, user) => ({ ...acc, [user.email]: user }), {});
 
   if (!usersByEmail['admin@mtr.com']) {
-    userRepository.create({ name: 'MTR Admin', email: 'admin@mtr.com', passwordHash: adminHash, role: 'admin' });
+    await userRepository.create({ name: 'MTR Admin', email: 'admin@mtr.com', passwordHash: adminHash, role: 'admin' });
   }
   if (!usersByEmail['ali@mtr.com']) {
-    userRepository.create({ name: 'Ali Khan', email: 'ali@mtr.com', passwordHash: customerHash1, role: 'customer' });
+    await userRepository.create({ name: 'Ali Khan', email: 'ali@mtr.com', passwordHash: customerHash1, role: 'customer' });
   }
   if (!usersByEmail['omar@mtr.com']) {
-    userRepository.create({ name: 'Omar Siddiqui', email: 'omar@mtr.com', passwordHash: customerHash2, role: 'customer' });
+    await userRepository.create({ name: 'Omar Siddiqui', email: 'omar@mtr.com', passwordHash: customerHash2, role: 'customer' });
   }
 
-  const existingCategories = categoryRepository.getAll().reduce((acc, category) => ({ ...acc, [category.name]: true }), {});
-  categoriesSeed.forEach((category) => {
+  const existingCategories = (await categoryRepository.getAll()).reduce(
+    (acc, category) => ({ ...acc, [category.name]: true }),
+    {}
+  );
+  for (const category of categoriesSeed) {
     if (!existingCategories[category.name]) {
-      categoryRepository.create(category);
+      await categoryRepository.create(category);
     }
-  });
+  }
 
-  const categoriesByName = categoryRepository
-    .getAll()
-    .reduce((acc, category) => ({ ...acc, [category.name]: category.categoryID }), {});
+  const categoriesByName = (await categoryRepository.getAll()).reduce(
+    (acc, category) => ({ ...acc, [category.name]: category.categoryID }),
+    {}
+  );
 
-  const existingProductsByName = productRepository
-    .getAll({ include_discontinued: 'true' })
-    .reduce((acc, product) => ({ ...acc, [product.name]: product }), {});
+  const existingProductsByName = (await productRepository.getAll({ include_discontinued: 'true' })).reduce(
+    (acc, product) => ({ ...acc, [product.name]: product }),
+    {}
+  );
 
-  productsSeed.forEach((product) => {
+  for (const product of productsSeed) {
     if (!existingProductsByName[product.name]) {
-      productRepository.create({
+      await productRepository.create({
         name: product.name,
         imageUrl: product.imageUrl,
         price: product.price,
@@ -115,53 +127,60 @@ export function seedDatabaseIfEmpty() {
         categoryID: categoriesByName[product.category]
       });
     }
-  });
+  }
 
-  const productRows = productRepository
-    .getAll({ include_discontinued: 'true' })
-    .filter((product) => productsSeed.some((seeded) => seeded.name === product.name));
+  const productRows = (await productRepository.getAll({ include_discontinued: 'true' })).filter((product) =>
+    productsSeed.some((seeded) => seeded.name === product.name)
+  );
 
-  productRows.forEach((product, productIndex) => {
-    const existingInventory = inventoryRepository.getByProductId(product.productID);
+  for (const [productIndex, product] of productRows.entries()) {
+    const existingInventory = await inventoryRepository.getByProductId(product.productID);
     const sizeSet = existingInventory.reduce((acc, item) => ({ ...acc, [item.size]: true }), {});
-    ['S', 'M', 'L', 'XL'].forEach((size, sizeIndex) => {
+    for (const [sizeIndex, size] of ['S', 'M', 'L', 'XL'].entries()) {
       if (!sizeSet[size]) {
         const stockQty = 8 + ((productIndex + 1) * 3 + sizeIndex * 2) % 22;
         const safetyStock = 6 + (sizeIndex % 2);
-        inventoryRepository.create({ productID: product.productID, size, stockQty, safetyStock });
+        await inventoryRepository.create({ productID: product.productID, size, stockQty, safetyStock });
       }
-    });
-  });
+    }
+  }
 
-  const allUsers = userRepository.getAll();
+  const allUsers = await userRepository.getAll();
   const usersByEmailLatest = allUsers.reduce((acc, user) => ({ ...acc, [user.email]: user }), {});
   const productsByName = productRows.reduce((acc, product) => ({ ...acc, [product.name]: product }), {});
 
-  allUsers
-    .filter((user) => user.role === 'customer')
-    .forEach((user) => cartRepository.getByUserId(user.userID));
+  for (const user of allUsers.filter((user) => user.role === 'customer')) {
+    await cartRepository.getByUserId(user.userID);
+  }
 
-  const reviewKeys = reviewRepository
-    .getAll()
-    .reduce((acc, review) => ({ ...acc, [`${review.userName}|${review.productName}|${review.comment}`]: true }), {});
+  const reviewKeys = (await reviewRepository.getAll()).reduce(
+    (acc, review) => ({ ...acc, [`${review.userName}|${review.productName}|${review.comment}`]: true }),
+    {}
+  );
 
-  reviewSeed.forEach((review) => {
+  for (const review of reviewSeed) {
     const user = usersByEmailLatest[review.email];
     const product = productsByName[review.product];
     const key = `${user?.name}|${review.product}|${review.comment}`;
     if (user && product && !reviewKeys[key]) {
-      reviewRepository.create({
+      await reviewRepository.create({
         userID: user.userID,
         productID: product.productID,
         rating: review.rating,
         comment: review.comment
       });
     }
-  });
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  initializeDatabase();
-  seedDatabaseIfEmpty();
-  console.log('Database initialized and seeded successfully');
+  runMigrations()
+    .then(() => seedDatabaseIfEmpty())
+    .then(() => {
+      console.log('Database migrated and seeded successfully');
+    })
+    .catch((error) => {
+      console.error('Database setup failed:', error);
+      process.exit(1);
+    });
 }

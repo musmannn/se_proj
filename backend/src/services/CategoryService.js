@@ -5,11 +5,11 @@ export default class CategoryService {
     this.categoryRepository = new CategoryRepository();
   }
 
-  getAllCategories() {
+  async getAllCategories() {
     return this.categoryRepository.getAll();
   }
 
-  createCategory(payload) {
+  async createCategory(payload) {
     if (!payload.name) {
       throw new Error('Category name is required');
     }

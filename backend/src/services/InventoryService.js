@@ -5,12 +5,12 @@ export default class InventoryService {
     this.inventoryRepository = new InventoryRepository();
   }
 
-  getByProductId(productId) {
+  async getByProductId(productId) {
     return this.inventoryRepository.getByProductId(productId);
   }
 
-  updateInventory(inventoryId, payload) {
-    const existing = this.inventoryRepository.getById(inventoryId);
+  async updateInventory(inventoryId, payload) {
+    const existing = await this.inventoryRepository.getById(inventoryId);
     if (!existing) {
       throw new Error('Inventory record not found');
     }
@@ -28,11 +28,11 @@ export default class InventoryService {
     });
   }
 
-  getLowStockAlerts() {
+  async getLowStockAlerts() {
     return this.inventoryRepository.getLowStockAlerts();
   }
 
-  getAllInventoryWithAlerts() {
+  async getAllInventoryWithAlerts() {
     return this.inventoryRepository.getAllWithAlerts();
   }
 }

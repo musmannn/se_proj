@@ -5,9 +5,9 @@ export default class AdminController {
     this.adminService = new AdminService();
   }
 
-  getDashboardSummary = (req, res, next) => {
+  getDashboardSummary = async (req, res, next) => {
     try {
-      const data = this.adminService.getDashboardSummary();
+      const data = await this.adminService.getDashboardSummary();
       res.json({ success: true, data, message: 'Dashboard summary fetched successfully' });
     } catch (error) {
       next(error);

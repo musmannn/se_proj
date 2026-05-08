@@ -46,17 +46,17 @@ export default class OrderService {
       .join('\n');
   }
 
-  checkout(userID, payload) {
+  async checkout(userID, payload) {
     const shippingAddr = this.buildShippingAddress(payload);
     return this.orderRepository.checkout({ userID, shippingAddr });
   }
 
-  getOwnOrders(userID) {
+  async getOwnOrders(userID) {
     return this.orderRepository.getByUserId(userID);
   }
 
-  getOrderDetail(orderId, requester) {
-    const order = this.orderRepository.getDetailById(orderId);
+  async getOrderDetail(orderId, requester) {
+    const order = await this.orderRepository.getDetailById(orderId);
     if (!order) {
       throw new Error('Order not found');
     }
@@ -67,8 +67,8 @@ export default class OrderService {
     return order;
   }
 
-  cancelOwnOrder(orderId, userID) {
-    const order = this.orderRepository.getById(orderId);
+  async cancelOwnOrder(orderId, userID) {
+    const order = await this.orderRepository.getById(orderId);
     if (!order || order.userID !== userID) {
       throw new Error('Order not found');
     }
@@ -78,15 +78,15 @@ export default class OrderService {
     return this.orderRepository.cancelAndRestock(orderId);
   }
 
-  getAllOrders() {
+  async getAllOrders() {
     return this.orderRepository.getAll();
   }
 
-  updateOrderStatus(orderId, status) {
+  async updateOrderStatus(orderId, status) {
     if (!this.allowedStatuses.includes(status)) {
       throw new Error('Invalid status');
     }
-    const order = this.orderRepository.getById(orderId);
+    const order = await this.orderRepository.getById(orderId);
     if (!order) {
       throw new Error('Order not found');
     }
