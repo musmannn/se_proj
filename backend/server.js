@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+
 import authRoutes from './src/routes/authRoutes.js';
 import productRoutes from './src/routes/productRoutes.js';
 import categoryRoutes from './src/routes/categoryRoutes.js';
@@ -9,17 +10,30 @@ import cartRoutes from './src/routes/cartRoutes.js';
 import orderRoutes from './src/routes/orderRoutes.js';
 import reviewRoutes from './src/routes/reviewRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
-import { initializeDatabase, seedDatabaseIfEmpty } from './src/db/database.js';
+
+import {
+  initializeDatabase,
+  seedDatabaseIfEmpty
+} from './src/db/database.js';
 
 dotenv.config();
 
 const app = express();
-const port = Number(process.env.PORT) || 8080;
 
 initializeDatabase();
 seedDatabaseIfEmpty();
 
-app.use(cors());
+app.use(
+  cors({
+    origin: [
+      'https://se-proj-self.vercel.app',
+      'http://localhost:5173'
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    credentials: true
+  })
+);
+
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
@@ -31,8 +45,16 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/admin', adminRoutes);
 
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Backend API running'
+  });
+});
+
 app.use((err, req, res, next) => {
   const status = err.status || 500;
+
   res.status(status).json({
     success: false,
     data: null,
@@ -40,6 +62,4 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(port, () => {
-  console.log(`MTR backend running on port ${port}`);
-});
+export default app;
